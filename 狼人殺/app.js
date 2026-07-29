@@ -526,4 +526,5 @@ function log(msg) {
   const item = document.createElement('div');
   item.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
   logEl.appendChild(item);
-  logEl.scrollTop = logEl.scrollHeight;}
+  logEl.scrollTop = logEl.scrollHeight;
+}
