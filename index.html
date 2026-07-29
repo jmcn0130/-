@@ -1,393 +1,448 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>duscat狼人殺</title>
-    <!-- 引入 Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
-    <style>
-        :root {
-            --bg: #121212;
-            --card: #1e1e1e;
-            --primary: #e53935;
-            --text: #ffffff;
-            --sub: #b0bec5;
-        }
-        body { font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 480px; background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); text-align: center; }
-        h1, h2 { color: var(--primary); margin-top: 0; }
-        .btn { background: var(--primary); color: #fff; border: none; padding: 12px; font-size: 16px; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 10px; }
-        .btn:disabled { background: #555; cursor: not-allowed; }
-        input, select { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #444; background: #2a2a2a; color: #fff; box-sizing: border-box; }
-        .screen { display: none; }
-        .active { display: block; }
-        .room-code { font-size: 32px; letter-spacing: 4px; color: #4fc3f7; font-weight: bold; margin: 10px 0; }
-        .player-list { list-style: none; padding: 0; text-align: left; }
-        .player-item { background: #2a2a2a; margin: 6px 0; padding: 10px 15px; border-radius: 6px; display: flex; justify-content: space-between; }
-        .role-card { background: #333; padding: 15px; border-radius: 8px; font-size: 20px; font-weight: bold; margin: 15px 0; color: #ffca28; }
-        .dead { text-decoration: line-through; color: #777; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC 狼人殺多人連線</title>
+  <!-- 引入 PeerJS WebRTC 套件 -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #121212;
+      color: #e0e0e0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container { width: 100%; max-width: 500px; }
+    h1 { text-align: center; margin-bottom: 20px; color: #ff5252; }
+
+    .card {
+      background: #1e1e1e;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      margin-bottom: 20px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 12px;
+      margin: 8px 0;
+      background: #2d2d2d;
+      border: 1px solid #444;
+      color: white;
+      border-radius: 6px;
+      font-size: 16px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      margin: 6px 0;
+      border: none;
+      border-radius: 6px;
+      background: #424242;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    .btn.primary { background: #e53935; }
+    .btn.primary:hover { background: #d32f2f; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .hidden { display: none !important; }
+    hr { border: 0; height: 1px; background: #333; margin: 15px 0; }
+
+    ul { list-style: none; padding: 0; margin: 15px 0; }
+    li {
+      padding: 10px;
+      background: #2a2a2a;
+      margin-bottom: 6px;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .tag { font-size: 12px; padding: 2px 6px; background: #ff9800; border-radius: 4px; color: black; }
+    .badge { padding: 6px 12px; background: #333; border-radius: 20px; font-size: 14px; font-weight: bold; }
+    .badge.role { background: #673ab7; }
+
+    .log-box {
+      background: #121212;
+      border: 1px solid #333;
+      height: 180px;
+      overflow-y: auto;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 14px;
+      margin: 15px 0;
+    }
+    .log-item { margin-bottom: 6px; border-bottom: 1px solid #222; padding-bottom: 4px; }
+    .action-box { background: #2a2a2a; padding: 15px; border-radius: 6px; }
+  </style>
 </head>
 <body>
+  <div class="container">
+    <h1>🐺 狼人殺 Werewolf</h1>
 
-<div class="container">
-    <!-- 1. 大廳 -->
-    <div id="lobby-screen" class="screen active">
-        <h1>🐺 duscat狼人殺</h1>
-        <input type="text" id="player-name-input" placeholder="請輸入你的暱稱">
-        <button class="btn" onclick="createRoom()">創建新房間</button>
-        <hr style="border-color: #333; margin: 20px 0;">
-        <input type="text" id="room-code-input" placeholder="輸入 4 位數房間號">
-        <button class="btn" style="background:#0288d1" onclick="joinRoom()">加入房間</button>
+    <!-- 步驟 1: 登入/建立房間 -->
+    <div id="login-card" class="card">
+      <h2>玩家設定</h2>
+      <input type="text" id="username" placeholder="輸入你的暱稱" value="玩家A">
+      <hr>
+      <button id="btn-create-room" class="btn primary">創建新房間 (擔任房主)</button>
+      <div style="margin: 15px 0; text-align: center;">或</div>
+      <input type="text" id="room-id-input" placeholder="輸入房間代碼">
+      <button id="btn-join-room" class="btn">加入房間</button>
     </div>
 
-    <!-- 2. 等待室 -->
-    <div id="room-screen" class="screen">
-        <h2>房間號碼</h2>
-        <div id="display-room-code" class="room-code">----</div>
-        <h3>當前玩家 (<span id="player-count">0</span>/6)</h3>
-        <ul id="waiting-player-list" class="player-list"></ul>
-        <div id="host-controls" style="display:none;">
-            <p style="color:var(--sub); font-size:14px;">滿 6 人後房主可開始遊戲</p>
-            <button id="start-btn" class="btn" onclick="hostStartGame()" disabled>人數不足</button>
-        </div>
-        <p id="guest-msg" style="color:var(--sub);">等待房主開始遊戲...</p>
+    <!-- 步驟 2: 遊戲等待大廳 -->
+    <div id="lobby-card" class="card hidden">
+      <h2>遊戲大廳 <span id="room-tag" class="tag"></span></h2>
+      <p>房間代碼：<b id="room-code-display"></b> (複製分享給好友)</p>
+      
+      <h3>玩家列表 (<span id="player-count">0</span>)</h3>
+      <ul id="player-list"></ul>
+
+      <div id="host-controls" class="hidden">
+        <button id="btn-start-game" class="btn primary">房主開始遊戲</button>
+      </div>
+      <p id="client-waiting-msg" class="info-text">等待房主開始遊戲...</p>
     </div>
 
-    <!-- 3. 遊戲主畫面 -->
-    <div id="game-screen" class="screen">
-        <h2 id="phase-title">準備階段</h2>
-        <div id="my-role-card" class="role-card">身分加載中...</div>
+    <!-- 步驟 3: 遊戲主畫面 -->
+    <div id="game-card" class="card hidden">
+      <div class="game-header">
+        <span id="phase-display" class="badge">階段：準備中</span>
+        <span id="role-display" class="badge role">你的身份：未知</span>
+      </div>
 
-        <!-- 房主專用夜間/白天控制台 -->
-        <div id="action-box"></div>
+      <div id="game-log" class="log-box"></div>
+
+      <div id="action-panel" class="action-box">
+        <h3>可執行動作</h3>
+        <div id="action-buttons"></div>
+      </div>
     </div>
+  </div>
 
-    <!-- 4. 遊戲結束 -->
-    <div id="gameover-screen" class="screen">
-        <h1 id="winner-title"></h1>
-        <ul id="final-roles" class="player-list"></ul>
-        <button class="btn" onclick="location.reload()">回到大廳</button>
-    </div>
-</div>
-
-<script>
-    // ----------------------------------------------------
-    // 請將下方貼換成你在 Firebase 取得的實際設定檔
-    // ----------------------------------------------------
-    const firebaseConfig = {
-        apiKey: "YOUR_API_KEY",
-        authDomain: "YOUR_PROJECT.firebaseapp.com",
-        databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-        projectId: "YOUR_PROJECT",
-        storageBucket: "YOUR_PROJECT.appspot.com",
-        messagingSenderId: "123456789",
-        appId: "1:123456789:web:abcdef"
-    };
-    // ----------------------------------------------------
-
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
-
-    let myPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
+  <script>
+    let peer = null;
+    let connections = {}; // 房主記錄所有客戶端連線
+    let hostConn = null;  // 組員記錄與房主的連線
+    let myId = '';
     let myName = '';
-    let currentRoomCode = '';
     let isHost = false;
-    let roomRef = null;
 
-    const rolesConfig = ['狼人', '狼人', '預言家', '女巫', '平民', '平民'];
+    // 遊戲狀態 (由房主維護)
+    let players = []; // { id, name, role, isAlive: true }
+    let gamePhase = 'LOBBY'; // LOBBY, NIGHT_WOLF, DAY_VOTE, END
+    let votes = {};
 
-    function showScreen(id) {
-        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-        document.getElementById(id).classList.add('active');
-    }
+    // UI 元素
+    const loginCard = document.getElementById('login-card');
+    const lobbyCard = document.getElementById('lobby-card');
+    const gameCard = document.getElementById('game-card');
+    const usernameInput = document.getElementById('username');
+    const playerList = document.getElementById('player-list');
+    const logBox = document.getElementById('game-log');
+    const actionButtons = document.getElementById('action-buttons');
 
-    function createRoom() {
-        myName = document.getElementById('player-name-input').value.trim();
-        if (!myName) return alert("請輸入暱稱！");
-
-        currentRoomCode = Math.floor(1000 + Math.random() * 9000).toString();
-        isHost = true;
-        roomRef = db.ref('rooms/' + currentRoomCode);
-
-        const initialData = {
-            state: 'waiting',
-            host: myPlayerId,
-            players: {
-                [myPlayerId]: { name: myName, isAlive: true, role: '' }
-            },
-            nightActions: { wolfTarget: null, seerTarget: null, witchSave: false, witchPoisonTarget: null }
-        };
-
-        roomRef.set(initialData).then(() => {
-            enterRoomUI();
-            listenToRoom();
+    // 初始化 Peer
+    function initPeer(customId = null) {
+      return new Promise((resolve) => {
+        peer = customId ? new Peer(customId) : new Peer();
+        peer.on('open', (id) => {
+          myId = id;
+          resolve(id);
         });
+      });
     }
 
-    function joinRoom() {
-        myName = document.getElementById('player-name-input').value.trim();
-        const code = document.getElementById('room-code-input').value.trim();
-        if (!myName || !code) return alert("請填寫暱稱和房間號！");
+    // 建立房間 (房主)
+    document.getElementById('btn-create-room').addEventListener('click', async () => {
+      myName = usernameInput.value.trim() || '房主';
+      isHost = true;
+      
+      // 生成短房間號
+      const roomId = 'room-' + Math.random().toString(36).substring(2, 7);
+      await initPeer(roomId);
 
-        currentRoomCode = code;
-        roomRef = db.ref('rooms/' + currentRoomCode);
+      document.getElementById('room-code-display').innerText = roomId;
+      document.getElementById('room-tag').innerText = '房主';
+      document.getElementById('host-controls').classList.remove('hidden');
+      document.getElementById('client-waiting-msg').classList.add('hidden');
 
-        roomRef.once('value', snapshot => {
-            if (!snapshot.exists()) return alert("房間不存在！");
-            const data = snapshot.val();
-            if (data.state !== 'waiting') return alert("遊戲已開始，無法加入！");
-            
-            const pCount = Object.keys(data.players || {}).length;
-            if (pCount >= 6) return alert("房間已滿 6 人！");
+      players.push({ id: myId, name: myName, isAlive: true, role: '' });
+      updateLobbyUI();
 
-            roomRef.child('players/' + myPlayerId).set({
-                name: myName, isAlive: true, role: ''
-            }).then(() => {
-                isHost = false;
-                enterRoomUI();
-                listenToRoom();
-            });
+      // 監聽組員連線
+      peer.on('connection', (conn) => {
+        conn.on('open', () => {
+          connections[conn.peer] = conn;
         });
+
+        conn.on('data', (data) => {
+          handleHostMessage(conn.peer, data);
+        });
+
+        conn.on('close', () => {
+          delete connections[conn.peer];
+          players = players.filter(p => p.id !== conn.peer);
+          broadcastState();
+        });
+      });
+
+      showCard(lobbyCard);
+    });
+
+    // 加入房間 (組員)
+    document.getElementById('btn-join-room').addEventListener('click', async () => {
+      myName = usernameInput.value.trim() || '玩家';
+      const targetRoomId = document.getElementById('room-id-input').value.trim();
+      if (!targetRoomId) return alert('請輸入房間代碼');
+
+      isHost = false;
+      await initPeer();
+
+      hostConn = peer.connect(targetRoomId);
+
+      hostConn.on('open', () => {
+        hostConn.send({ type: 'JOIN', name: myName });
+        document.getElementById('room-code-display').innerText = targetRoomId;
+        document.getElementById('room-tag').innerText = '組員';
+        showCard(lobbyCard);
+      });
+
+      hostConn.on('data', (data) => {
+        handleClientMessage(data);
+      });
+
+      hostConn.on('close', () => {
+        alert('與房主的連線已中斷！');
+        location.reload();
+      });
+    });
+
+    // 房主接收訊息
+    function handleHostMessage(peerId, data) {
+      if (data.type === 'JOIN') {
+        players.push({ id: peerId, name: data.name, isAlive: true, role: '' });
+        broadcastState();
+      } else if (data.type === 'ACTION_SUBMIT') {
+        votes[peerId] = data.targetId;
+        checkPhaseCompletion();
+      }
     }
 
-    function enterRoomUI() {
-        showScreen('room-screen');
-        document.getElementById('display-room-code').innerText = currentRoomCode;
-        if (isHost) {
-            document.getElementById('host-controls').style.display = 'block';
-            document.getElementById('guest-msg').style.display = 'none';
+    // 組員接收訊息
+    function handleClientMessage(data) {
+      if (data.type === 'SYNC_STATE') {
+        players = data.players;
+        gamePhase = data.gamePhase;
+        updateLobbyUI();
+        
+        if (gamePhase !== 'LOBBY') {
+          showCard(gameCard);
+          renderGameUI(data.personalRole);
         }
+      } else if (data.type === 'LOG') {
+        appendLog(data.msg);
+      }
     }
 
-    function listenToRoom() {
-        roomRef.on('value', snapshot => {
-            const room = snapshot.val();
-            if (!room) return;
-
-            // 更新等待室列表
-            const playersArr = Object.entries(room.players || {}).map(([id, p]) => ({ id, ...p }));
-            document.getElementById('player-count').innerText = playersArr.length;
-            
-            const listEl = document.getElementById('waiting-player-list');
-            listEl.innerHTML = playersArr.map(p => `<li class="player-item">${p.name} ${p.id === room.host ? '👑(房主)' : ''}</li>`).join('');
-
-            if (isHost) {
-                const btn = document.getElementById('start-btn');
-                if (playersArr.length === 6) {
-                    btn.disabled = false;
-                    btn.innerText = "開始遊戲";
-                } else {
-                    btn.disabled = true;
-                    btn.innerText = `還差 ${6 - playersArr.length} 人`;
-                }
-            }
-
-            // 狀態變更監聽
-            if (room.state === 'playing') {
-                showScreen('game-screen');
-                renderGamePhase(room);
-            } else if (room.state === 'gameover') {
-                showScreen('gameover-screen');
-                document.getElementById('winner-title').innerText = room.winnerText;
-                document.getElementById('final-roles').innerHTML = playersArr.map(p => 
-                    `<li class="player-item"><span>${p.name}</span><span>${p.role} (${p.isAlive ? '存活' : '陣亡'})</span></li>`
-                ).join('');
-            }
-        });
-    }
-
-    // 洗牌函數
-    function shuffle(arr) {
-        return arr.sort(() => Math.random() - 0.5);
-    }
-
-    // 房主發起遊戲發牌
-    function hostStartGame() {
-        roomRef.once('value', snapshot => {
-            const room = snapshot.val();
-            const pIds = Object.keys(room.players);
-            const shuffledRoles = shuffle([...rolesConfig]);
-
-            let updates = {};
-            pIds.forEach((id, idx) => {
-                updates[`players/${id}/role`] = shuffledRoles[idx];
-            });
-            updates['state'] = 'playing';
-            updates['phase'] = 'night_wolf'; // 第一夜開始
-
-            roomRef.update(updates);
-        });
-    }
-
-    // 渲染遊戲階段與操作
-    function renderGamePhase(room) {
-        const myData = room.players[myPlayerId];
-        document.getElementById('my-role-card').innerText = `你的身分：${myData.role} (${myData.isAlive ? '存活' : '已陣亡'})`;
-
-        const title = document.getElementById('phase-title');
-        const box = document.getElementById('action-box');
-        box.innerHTML = '';
-
-        const alivePlayers = Object.entries(room.players)
-            .map(([id, p]) => ({ id, ...p }))
-            .filter(p => p.isAlive);
-
-        if (!myData.isAlive) {
-            title.innerText = "👻 你已陣亡，觀戰中...";
-            return;
+    // 廣播最新狀態給所有人
+    function broadcastState() {
+      updateLobbyUI();
+      players.forEach(p => {
+        if (p.id === myId) return; // 房主自己不用傳
+        if (connections[p.id]) {
+          connections[p.id].send({
+            type: 'SYNC_STATE',
+            players: players.map(pInfo => ({ id: pInfo.id, name: pInfo.name, isAlive: pInfo.isAlive })),
+            gamePhase: gamePhase,
+            personalRole: p.role // 只發送屬於該玩家的私密身份
+          });
         }
+      });
 
-        // --- 階段 1：狼人請睜眼 ---
-        if (room.phase === 'night_wolf') {
-            title.innerText = "🌙 夜晚：狼人請睜眼";
-            if (myData.role === '狼人') {
-                box.innerHTML = `<h3>🐺 請選擇擊殺目標：</h3>` + createSelect('wolf-target', alivePlayers);
-                if (isHost) {
-                    box.innerHTML += `<button class="btn" onclick="hostNextPhase('night_seer')">確認並進入預言家階段</button>`;
-                }
-            } else {
-                box.innerHTML = `<p>狼人正在閉眼行動中...</p>`;
-            }
-        } 
-        // --- 階段 2：預言家請睜眼 ---
-        else if (room.phase === 'night_seer') {
-            title.innerText = "🌙 夜晚：預言家請睜眼";
-            if (myData.role === '預言家') {
-                box.innerHTML = `<h3>🔮 請選擇查驗目標：</h3>` + createSelect('seer-target', alivePlayers, myPlayerId);
-                box.innerHTML += `<button class="btn" onclick="checkSeerRole()">查驗身分</button><p id="seer-res"></p>`;
-            } else {
-                box.innerHTML = `<p>預言家正在閉眼行動中...</p>`;
-            }
-            if (isHost) box.innerHTML += `<button class="btn" style="margin-top:20px;background:#555;" onclick="hostNextPhase('night_witch')">下一步（進入女巫階段）</button>`;
-        }
-        // --- 階段 3：女巫請睜眼 ---
-        else if (room.phase === 'night_witch') {
-            title.innerText = "🌙 夜晚：女巫請睜眼";
-            if (myData.role === '女巫') {
-                const victimId = room.nightActions ? room.nightActions.wolfTarget : null;
-                const victim = victimId ? room.players[victimId].name : '無人';
-                box.innerHTML = `<p>今晚被襲擊的是：<strong>${victim}</strong></p>`;
-                box.innerHTML += `<label><input type="checkbox" id="witch-save"> 使用解藥救他</label><br><br>`;
-                box.innerHTML += `<p>毒藥目標：</p>` + createSelect('witch-poison', alivePlayers);
-            } else {
-                box.innerHTML = `<p>女巫正在閉眼行動中...</p>`;
-            }
-            if (isHost) box.innerHTML += `<button class="btn" style="margin-top:20px;" onclick="hostSettleNight()">天亮了 (結算夜晚)</button>`;
-        }
-        // --- 階段 4：白天討論與投票 ---
-        else if (room.phase === 'day_vote') {
-            title.innerText = "☀️ 白天：討論與投票放逐";
-            box.innerHTML = `<p>昨晚死亡：<strong>${room.lastNightDead || '平安夜'}</strong></p>`;
-            box.innerHTML += `<h3>請選擇放逐投票目標：</h3>` + createSelect('vote-target', alivePlayers);
-            if (isHost) {
-                box.innerHTML += `<button class="btn" onclick="hostSettleVote()">處決投票目標</button>`;
-            }
-        }
+      if (gamePhase !== 'LOBBY') {
+        const hostRole = players.find(p => p.id === myId)?.role;
+        renderGameUI(hostRole);
+      }
     }
 
-    function createSelect(id, players, excludeId = null) {
-        let html = `<select id="${id}"><option value="">-- 請選擇 --</option>`;
-        players.forEach(p => {
-            if (p.id !== excludeId) {
-                html += `<option value="${p.id}">${p.name}</option>`;
-            }
+    // 更新大廳介面
+    function updateLobbyUI() {
+      document.getElementById('player-count').innerText = players.length;
+      playerList.innerHTML = players.map(p => 
+        `<li>${p.name} ${p.id === myId ? '(你)' : ''} ${p.id === players[0].id ? '<span class="tag">房主</span>' : ''}</li>`
+      ).join('');
+    }
+
+    // 房主：開始遊戲與分配身份
+    document.getElementById('btn-start-game').addEventListener('click', () => {
+      if (players.length < 3) return alert('遊戲人數至少需要 3 人！');
+
+      // 簡單配牌：1狼人，1預言家，其餘平民 (可根據人數擴充)
+      let roles = ['狼人', '預言家'];
+      while (roles.length < players.length) {
+        roles.push('平民');
+      }
+      roles.sort(() => Math.random() - 0.5); // 洗牌
+
+      players.forEach((p, index) => {
+        p.role = roles[index];
+        p.isAlive = true;
+      });
+
+      gamePhase = 'NIGHT_WOLF';
+      broadcastState();
+      broadcastLog('🌙 夜幕降臨，狼人請睜眼殺人...');
+    });
+
+    // 渲染遊戲操作 UI
+    function renderGameUI(myRole) {
+      document.getElementById('role-display').innerText = `你的身份：${myRole}`;
+      document.getElementById('phase-display').innerText = `階段：${getPhaseName(gamePhase)}`;
+      
+      actionButtons.innerHTML = '';
+      const me = players.find(p => p.id === myId);
+
+      if (!me.isAlive) {
+        actionButtons.innerHTML = '<p>你已經死亡，無法行動。</p>';
+        return;
+      }
+
+      // 根據階段與身份顯示行動按鈕
+      if (gamePhase === 'NIGHT_WOLF' && myRole === '狼人') {
+        players.filter(p => p.isAlive).forEach(p => {
+          const btn = document.createElement('button');
+          btn.className = 'btn';
+          btn.innerText = `襲擊 ${p.name}`;
+          btn.onclick = () => submitAction(p.id);
+          actionButtons.appendChild(btn);
         });
-        return html + `</select>`;
-    }
-
-    function checkSeerRole() {
-        const tid = document.getElementById('seer-target').value;
-        if (!tid) return;
-        roomRef.child('players/' + tid).once('value', snap => {
-            const target = snap.val();
-            document.getElementById('seer-res').innerText = `${target.name} 是 【${target.role === '狼人' ? '狼人 🐺' : '好人 😇'}】`;
+      } else if (gamePhase === 'DAY_VOTE') {
+        players.filter(p => p.isAlive && p.id !== myId).forEach(p => {
+          const btn = document.createElement('button');
+          btn.className = 'btn';
+          btn.innerText = `放逐 ${p.name}`;
+          btn.onclick = () => submitAction(p.id);
+          actionButtons.appendChild(btn);
         });
+      } else {
+        actionButtons.innerHTML = '<p>請等待其他玩家行動...</p>';
+      }
     }
 
-    // 房主控制流與夜間結算
-    function hostNextPhase(nextPhase) {
-        // 保存狼人選擇
-        const wolfEl = document.getElementById('wolf-target');
-        if (wolfEl && wolfEl.value) {
-            roomRef.child('nightActions/wolfTarget').set(wolfEl.value);
+    // 玩家提交操作
+    function submitAction(targetId) {
+      actionButtons.innerHTML = '<p>行動已鎖定，等待其他人...</p>';
+      if (isHost) {
+        votes[myId] = targetId;
+        checkPhaseCompletion();
+      } else {
+        hostConn.send({ type: 'ACTION_SUBMIT', targetId: targetId });
+      }
+    }
+
+    // 房主：檢查階段完成並推進流程
+    function checkPhaseCompletion() {
+      if (!isHost) return;
+
+      if (gamePhase === 'NIGHT_WOLF') {
+        const wolves = players.filter(p => p.isAlive && p.role === '狼人');
+        if (Object.keys(votes).length >= wolves.length) {
+          // 計算死者
+          const targetId = Object.values(votes)[0]; // 簡化邏輯：取第一個狼人的選擇
+          const victim = players.find(p => p.id === targetId);
+          if (victim) victim.isAlive = false;
+
+          votes = {};
+          gamePhase = 'DAY_VOTE';
+          broadcastState();
+          broadcastLog(`☀️ 太陽升起，玩家 [${victim ? victim.name : '無'}] 昨晚遇害了！請開始討論並投票放逐。`);
+          checkWinCondition();
         }
-        roomRef.child('phase').set(nextPhase);
-    }
-
-    function hostSettleNight() {
-        roomRef.once('value', snap => {
-            const room = snap.val();
-            let deadList = [];
-            
-            // 讀取女巫畫面選擇
-            const saveCb = document.getElementById('witch-save');
-            const poisonEl = document.getElementById('witch-poison');
-            const isSaved = saveCb ? saveCb.checked : false;
-            const poisonId = poisonEl ? poisonEl.value : null;
-
-            const wolfTarget = room.nightActions ? room.nightActions.wolfTarget : null;
-
-            if (wolfTarget && !isSaved) deadList.push(wolfTarget);
-            if (poisonId) deadList.push(poisonId);
-
-            let deadNames = [];
-            let updates = {};
-            
-            deadList.forEach(id => {
-                updates[`players/${id}/isAlive`] = false;
-                deadNames.push(room.players[id].name);
-            });
-
-            updates['lastNightDead'] = deadNames.length > 0 ? deadNames.join('、') : '無人死亡 (平安夜)';
-            updates['phase'] = 'day_vote';
-
-            roomRef.update(updates).then(() => {
-                checkWinner(room.players, updates);
-            });
-        });
-    }
-
-    function hostSettleVote() {
-        const targetId = document.getElementById('vote-target').value;
-        if (!targetId) return alert("請選擇放逐目標！");
-
-        roomRef.once('value', snap => {
-            const room = snap.val();
-            let updates = {};
-            updates[`players/${targetId}/isAlive`] = false;
-            updates['phase'] = 'night_wolf';
-            updates['nightActions'] = { wolfTarget: null };
-
-            alert(`${room.players[targetId].name} 已被放逐！`);
-
-            roomRef.update(updates).then(() => {
-                checkWinner(room.players, updates);
-            });
-        });
-    }
-
-    function checkWinner(playersData, currentUpdates) {
-        // 合併最新死亡狀態
-        let players = JSON.parse(JSON.stringify(playersData));
-        Object.keys(currentUpdates).forEach(key => {
-            if (key.startsWith('players/')) {
-                const parts = key.split('/');
-                players[parts[1]][parts[2]] = currentUpdates[key];
+      } else if (gamePhase === 'DAY_VOTE') {
+        const alivePlayers = players.filter(p => p.isAlive);
+        if (Object.keys(votes).length >= alivePlayers.length) {
+          // 統計票數
+          const voteCounts = {};
+          Object.values(votes).forEach(id => voteCounts[id] = (voteCounts[id] || 0) + 1);
+          
+          let maxVotes = 0;
+          let executedId = null;
+          for (let id in voteCounts) {
+            if (voteCounts[id] > maxVotes) {
+              maxVotes = voteCounts[id];
+              executedId = id;
             }
-        });
+          }
 
-        const wolves = Object.values(players).filter(p => p.isAlive && p.role === '狼人');
-        const goods = Object.values(players).filter(p => p.isAlive && p.role !== '狼人');
+          const executed = players.find(p => p.id === executedId);
+          if (executed) executed.isAlive = false;
 
-        if (wolves.length === 0) {
-            roomRef.update({ state: 'gameover', winnerText: '🎉 好人陣營獲勝！狼人已被全滅。' });
-        } else if (wolves.length >= goods.length) {
-            roomRef.update({ state: 'gameover', winnerText: '🐺 狼人陣營獲勝！狼人人數已佔優勢。' });
+          votes = {};
+          gamePhase = 'NIGHT_WOLF';
+          broadcastState();
+          broadcastLog(`⚖️ 投票結果：玩家 [${executed ? executed.name : '無'}] 被投票放逐！`);
+          checkWinCondition();
         }
+      }
     }
-</script>
+
+    // 檢查勝負條件
+    function checkWinCondition() {
+      const aliveWolves = players.filter(p => p.isAlive && p.role === '狼人');
+      const aliveHumans = players.filter(p => p.isAlive && p.role !== '狼人');
+
+      if (aliveWolves.length === 0) {
+        broadcastLog('🎉 遊戲結束！好人陣營獲得勝利！');
+        gamePhase = 'END';
+      } else if (aliveWolves.length >= aliveHumans.length) {
+        broadcastLog('🐺 遊戲結束！狼人陣營獲得勝利！');
+        gamePhase = 'END';
+      }
+    }
+
+    // 廣播日誌
+    function broadcastLog(msg) {
+      appendLog(msg);
+      if (isHost) {
+        Object.values(connections).forEach(conn => conn.send({ type: 'LOG', msg: msg }));
+      }
+    }
+
+    function appendLog(msg) {
+      const item = document.createElement('div');
+      item.className = 'log-item';
+      item.innerText = msg;
+      logBox.appendChild(item);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function showCard(cardToShow) {
+      [loginCard, lobbyCard, gameCard].forEach(card => card.classList.add('hidden'));
+      cardToShow.classList.remove('hidden');
+    }
+
+    function getPhaseName(phase) {
+      switch (phase) {
+        case 'NIGHT_WOLF': return '黑夜 (狼人行動)';
+        case 'DAY_VOTE': return '白天 (投票放逐)';
+        case 'END': return '遊戲結束';
+        default: return '等待中';
+      }
+    }
+  </script>
 </body>
-</html>
+</html>	
