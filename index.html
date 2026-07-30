@@ -32,7 +32,7 @@
 
     .card h2 { margin-bottom: 15px; font-size: 20px; border-bottom: 1px solid #333; padding-bottom: 8px; }
 
-    input[type="text"] {
+    input[type="text"], select {
       width: 100%;
       padding: 12px;
       margin: 8px 0;
@@ -114,6 +114,21 @@
       line-height: 1.5;
     }
     .rules-box b { color: #ddd; }
+    
+    .setting-group {
+      background: #252525;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      border: 1px solid #383838;
+    }
+    .setting-group label {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 6px;
+      color: #ffb74d;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -142,8 +157,23 @@
         2. <b>狼人勝</b>：狼人數等於或大於好人數。<br>
         3. <b>投票機制</b>：白天發言後進行投票，<b>最高票者放逐死亡</b>；若發生<b>平票則無人死亡</b>，直接進入下一夜。
       </div>
+
+      <!-- 房主設定區 -->
+      <div id="host-settings" class="setting-group hidden">
+        <label for="max-players-select">自訂房間人數上限：</label>
+        <select id="max-players-select">
+          <option value="6">6 人</option>
+          <option value="7">7 人</option>
+          <option value="8">8 人</option>
+          <option value="9">9 人</option>
+          <option value="10">10 人</option>
+          <option value="12">12 人</option>
+          <option value="15">15 人</option>
+          <option value="18">18 人</option>
+        </select>
+      </div>
       
-      <h3>玩家列表 (<span id="player-count">0</span> / 最少 6 人)</h3>
+      <h3>玩家列表 (<span id="player-count">0</span> / <span id="max-player-count">6</span> 人)</h3>
       <ul id="player-list"></ul>
 
       <div id="host-controls" class="hidden">
@@ -180,6 +210,7 @@
     // 遊戲狀態
     let gameState = {
       phase: 'LOBBY', 
+      maxPlayers: 6,  // 預設人數上限
       players: [],    
       logs: [],
       speakingIndex: 0, 
@@ -198,9 +229,13 @@
     const logBox = document.getElementById('game-log');
     const actionButtons = document.getElementById('action-buttons');
     const actionStatus = document.getElementById('action-status');
+    const maxPlayersSelect = document.getElementById('max-players-select');
 
     function initPeer(customId = null) {
       return new Promise((resolve) => {
+        if (peer) {
+          peer.destroy();
+        }
         peer = customId ? new Peer(customId) : new Peer();
         peer.on('open', (id) => {
           myId = id;
@@ -211,6 +246,9 @@
 
     // 房主建立房間
     document.getElementById('btn-create-room').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-create-room');
+      btn.disabled = true;
+
       myName = usernameInput.value.trim() || '房主';
       isHost = true;
       
@@ -220,31 +258,55 @@
       document.getElementById('room-code-display').innerText = roomId;
       document.getElementById('room-tag').innerText = '房主';
       document.getElementById('host-controls').classList.remove('hidden');
+      document.getElementById('host-settings').classList.remove('hidden');
       document.getElementById('client-waiting-msg').classList.add('hidden');
 
-      gameState.players.push({ id: myId, name: myName, isAlive: true, role: '', seatNumber: 0 });
+      gameState.maxPlayers = parseInt(maxPlayersSelect.value, 10);
+      gameState.players = [{ id: myId, name: myName, isAlive: true, role: '', seatNumber: 0 }];
       syncAndRender();
 
       peer.on('connection', (conn) => {
-        conn.on('open', () => { connections[conn.peer] = conn; });
-        conn.on('data', (data) => { handleHostMessage(conn.peer, data); });
+        conn.on('open', () => { 
+          connections[conn.peer] = conn; 
+        });
+        conn.on('data', (data) => { 
+          handleHostMessage(conn.peer, data); 
+        });
         conn.on('close', () => {
           delete connections[conn.peer];
-          gameState.players = gameState.players.filter(p => p.id !== conn.peer);
-          addLog(`[系統] 玩家離線，已移出房間。`);
-          syncAndRender();
+          if (gameState.phase === 'LOBBY') {
+            gameState.players = gameState.players.filter(p => p.id !== conn.peer);
+            addLog(`[系統] 玩家離線，已移出房間。`);
+            syncAndRender();
+          }
         });
       });
 
       showCard(lobbyCard);
     });
 
+    // 房主更改人數上限選單事件
+    maxPlayersSelect.addEventListener('change', (e) => {
+      if (!isHost) return;
+      const newMax = parseInt(e.target.value, 10);
+      if (gameState.players.length > newMax) {
+        alert(`目前已有 ${gameState.players.length} 人，人數上限不可低於當前玩家數量！`);
+        maxPlayersSelect.value = gameState.maxPlayers;
+        return;
+      }
+      gameState.maxPlayers = newMax;
+      addLog(`[房主設定] 人數上限已調整為 ${newMax} 人。`);
+      syncAndRender();
+    });
+
     // 客戶端加入房間
     document.getElementById('btn-join-room').addEventListener('click', async () => {
+      const btnJoin = document.getElementById('btn-join-room');
       myName = usernameInput.value.trim() || '玩家';
       const targetRoomId = document.getElementById('room-id-input').value.trim();
       if (!targetRoomId) return alert('請輸入房間代碼');
 
+      btnJoin.disabled = true;
       isHost = false;
       await initPeer();
       hostConn = peer.connect(targetRoomId);
@@ -261,6 +323,8 @@
         alert('與房主的連線已中斷。');
         location.reload();
       });
+      
+      setTimeout(() => { btnJoin.disabled = false; }, 3000);
     });
 
     // 房主處理解析訊息
@@ -269,11 +333,28 @@
 
       if (data.type === 'REQ_JOIN') {
         if (gameState.phase !== 'LOBBY') {
-          connections[peerId].send({ type: 'ERROR', msg: '遊戲已開始，無法加入。' });
+          if (connections[peerId]) {
+            connections[peerId].send({ type: 'ERROR', msg: '遊戲已開始，無法加入。' });
+          }
           return;
         }
-        gameState.players.push({ id: peerId, name: data.name, isAlive: true, role: '', seatNumber: 0 });
-        addLog(`[系統] ${data.name} 加入了房間。`);
+
+        const existingPlayer = gameState.players.find(p => p.id === peerId);
+
+        // 人數上限檢查 (非舊玩家重新連線的情況下)
+        if (!existingPlayer && gameState.players.length >= gameState.maxPlayers) {
+          if (connections[peerId]) {
+            connections[peerId].send({ type: 'ERROR', msg: `房間人數已滿 (上限 ${gameState.maxPlayers} 人)，無法加入！` });
+          }
+          return;
+        }
+
+        if (existingPlayer) {
+          existingPlayer.name = data.name;
+        } else {
+          gameState.players.push({ id: peerId, name: data.name, isAlive: true, role: '', seatNumber: 0 });
+          addLog(`[系統] ${data.name} 加入了房間。`);
+        }
         syncAndRender();
       } else if (data.type === 'SUBMIT_ACTION') {
         processAction(peerId, data.action, data.targetId);
@@ -294,6 +375,7 @@
         renderUI();
       } else if (data.type === 'ERROR') {
         alert(data.msg);
+        location.reload(); // 發生無法加入等重大錯誤時刷新頁面重來
       }
     }
 
@@ -308,6 +390,7 @@
             type: 'SYNC_STATE',
             state: {
               phase: gameState.phase,
+              maxPlayers: gameState.maxPlayers,
               players: gameState.players.map(pl => ({ id: pl.id, name: pl.name, isAlive: pl.isAlive, seatNumber: pl.seatNumber })),
               logs: gameState.logs,
               speakingIndex: gameState.speakingIndex,
@@ -330,6 +413,8 @@
     // 畫面 UI 渲染
     function renderUI() {
       document.getElementById('player-count').innerText = gameState.players.length;
+      document.getElementById('max-player-count').innerText = gameState.maxPlayers;
+
       playerList.innerHTML = gameState.players.map(p => 
         `<li><span>${p.seatNumber ? p.seatNumber + '號 ' : ''}${p.name} ${p.id === myId ? '(你)' : ''} ${!p.isAlive ? '[已死亡]' : ''}</span>${p.id === gameState.players[0]?.id ? '<span class="tag">房主</span>' : ''}</li>`
       ).join('');
@@ -632,7 +717,13 @@
         return alert('遊玩人數不能低於 6 人！');
       }
 
+      // 動態角色配置
       let roles = ['狼人', '狼人', '預言家', '女巫', '騎士'];
+      // 若人數達到 9 人以上，多加一張狼人卡
+      if (gameState.players.length >= 9) {
+        roles.push('狼人');
+      }
+      // 剩餘位置補平民
       while (roles.length < gameState.players.length) {
         roles.push('平民');
       }
