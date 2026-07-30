@@ -87,6 +87,40 @@
       justify-content: space-between;
       align-items: center;
       border-left: 3px solid #555;
+      transition: all 0.3s ease;
+    }
+
+    /* 死亡玩家列表樣式 */
+    li.dead-player {
+      background: #1a1a1a;
+      border-left-color: #7f8c8d;
+      opacity: 0.5;
+      text-decoration: line-through;
+    }
+    li.dead-player .dead-tag {
+      color: #e74c3c;
+      font-weight: bold;
+      text-decoration: none;
+      display: inline-block;
+      margin-left: 6px;
+    }
+
+    /* 玩家死亡宣告提示條 */
+    .death-banner {
+      background-color: #b71c1c;
+      color: #ffffff;
+      text-align: center;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      font-weight: bold;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      animation: fadeIn 0.5s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .tag { font-size: 12px; padding: 2px 6px; background: #ff8f00; border-radius: 3px; color: #000; font-weight: bold; }
@@ -164,7 +198,7 @@
 
       <div class="rules-box">
         <b>遊戲規則與勝負判定：</b><br>
-        1. <b>好人勝</b>：狼人全部死亡。<br>
+        1. <b>好人勝</b>：狼人全部死亡（或開局無狼人）。<br>
         2. <b>狼人勝</b>：狼人數等於或大於好人數。<br>
         3. <b>女巫藥水</b>：解藥與毒藥<b>整場遊戲各只能使用一次</b>。<br>
         4. <b>投票機制</b>：白天發言後進行投票，<b>最高票者放逐死亡</b>；若發生<b>平票則無人死亡</b>，直接進入下一夜。
@@ -174,14 +208,20 @@
       <div id="host-settings" class="setting-group hidden">
         <label for="max-players-select">自訂房間人數上限：</label>
         <select id="max-players-select">
-          <option value="6">6 人 (1 狼人)</option>
-          <option value="7">7 人 (1 狼人)</option>
-          <option value="8">8 人 (2 狼人)</option>
-          <option value="9">9 人 (2 狼人)</option>
-          <option value="10">10 人 (2 狼人)</option>
-          <option value="12">12 人 (3 狼人)</option>
-          <option value="15">15 人 (4 狼人)</option>
-          <option value="18">18 人 (4 狼人)</option>
+          <option value="6">6 人</option>
+          <option value="7">7 人</option>
+          <option value="8">8 人</option>
+          <option value="9">9 人</option>
+          <option value="10">10 人</option>
+          <option value="12">12 人</option>
+          <option value="15">15 人</option>
+          <option value="18">18 人</option>
+        </select>
+
+        <label for="role-mode-select" style="margin-top: 10px;">職業分配模式：</label>
+        <select id="role-mode-select">
+          <option value="RANDOM">🎲 完全隨機 (每位玩家獨立隨機抽職業，角色可重複)</option>
+          <option value="STANDARD">⚖️ 標準配置 (依人數預設狼人與神職比例)</option>
         </select>
       </div>
       
@@ -196,6 +236,11 @@
 
     <!-- 步驟 3: 遊戲主畫面 -->
     <div id="game-card" class="card hidden">
+      <!-- 玩家死亡提示橫條 (預設隱藏) -->
+      <div id="death-banner" class="death-banner hidden">
+        ☠️ 你已經死亡，目前處於觀戰模式。
+      </div>
+
       <div class="game-header">
         <span id="phase-display" class="badge">階段：準備中</span>
         <span id="role-display" class="badge role">身份：未知</span>
@@ -223,6 +268,7 @@
     let gameState = {
       phase: 'LOBBY', 
       maxPlayers: 6,
+      roleMode: 'RANDOM', // 新增：預設為隨機分配模式
       players: [],    
       logs: [],
       speakingIndex: 0, 
@@ -236,12 +282,43 @@
     const loginCard = document.getElementById('login-card');
     const lobbyCard = document.getElementById('lobby-card');
     const gameCard = document.getElementById('game-card');
+    const deathBanner = document.getElementById('death-banner');
     const usernameInput = document.getElementById('username');
     const playerList = document.getElementById('player-list');
     const logBox = document.getElementById('game-log');
     const actionButtons = document.getElementById('action-buttons');
     const actionStatus = document.getElementById('action-status');
     const maxPlayersSelect = document.getElementById('max-players-select');
+    const roleModeSelect = document.getElementById('role-mode-select');
+
+    // 死亡系統 (Death System) 模組
+    const PlayerDeathHandler = {
+      processDeaths: function(previousPlayersState, currentPlayers) {
+        if (!previousPlayersState) return;
+
+        currentPlayers.forEach(p => {
+          const oldP = previousPlayersState.find(prev => prev.id === p.id);
+          if (oldP && oldP.isAlive && !p.isAlive) {
+            this.onPlayerDied(p);
+          }
+        });
+      },
+
+      onPlayerDied: function(player) {
+        addLog(`[死亡系統] 💀 玩家 ${player.seatNumber ? player.seatNumber + '號 ' : ''}[${player.name}] 已死亡！`);
+        if (player.id === myId) {
+          alert('☠️ 你已經死亡！你將進入觀戰狀態，無法繼續發言或投票。');
+        }
+      },
+
+      updateDeathUI: function(me) {
+        if (me && !me.isAlive && gameState.phase !== 'LOBBY') {
+          deathBanner.classList.remove('hidden');
+        } else {
+          deathBanner.classList.add('hidden');
+        }
+      }
+    };
 
     function initPeer(customId = null) {
       return new Promise((resolve) => {
@@ -274,6 +351,7 @@
       document.getElementById('client-waiting-msg').classList.add('hidden');
 
       gameState.maxPlayers = parseInt(maxPlayersSelect.value, 10);
+      gameState.roleMode = roleModeSelect.value;
       gameState.players = [{ id: myId, name: myName, isAlive: true, role: '', seatNumber: 0 }];
       syncAndRender();
 
@@ -297,7 +375,6 @@
       showCard(lobbyCard);
     });
 
-    // 房主踢人功能
     function kickPlayer(targetId) {
       if (!isHost || gameState.phase !== 'LOBBY') return;
       const target = gameState.players.find(p => p.id === targetId);
@@ -330,6 +407,15 @@
       syncAndRender();
     });
 
+    // 房主更改職業模式選單事件
+    roleModeSelect.addEventListener('change', (e) => {
+      if (!isHost) return;
+      gameState.roleMode = e.target.value;
+      const modeText = gameState.roleMode === 'RANDOM' ? '完全隨機' : '標準配置';
+      addLog(`[房主設定] 職業模式已調整為：${modeText}。`);
+      syncAndRender();
+    });
+
     // 客戶端加入房間
     document.getElementById('btn-join-room').addEventListener('click', async () => {
       const btnJoin = document.getElementById('btn-join-room');
@@ -358,7 +444,6 @@
       setTimeout(() => { btnJoin.disabled = false; }, 3000);
     });
 
-    // 房主處理解析訊息
     function handleHostMessage(peerId, data) {
       if (!isHost) return;
 
@@ -395,11 +480,13 @@
       }
     }
 
-    // 客戶端接收訊息
     function handleClientMessage(data) {
       if (data.type === 'SYNC_STATE') {
+        const oldPlayers = gameState.players;
         gameState = data.state;
         myRole = data.personalRole || myRole;
+        
+        PlayerDeathHandler.processDeaths(oldPlayers, gameState.players);
         renderUI();
       } else if (data.type === 'PRIVATE_NOTICE') {
         alert(data.msg);
@@ -414,7 +501,6 @@
       }
     }
 
-    // 同步狀態給所有玩家
     function syncAndRender() {
       if (!isHost) return;
 
@@ -426,6 +512,7 @@
             state: {
               phase: gameState.phase,
               maxPlayers: gameState.maxPlayers,
+              roleMode: gameState.roleMode,
               players: gameState.players.map(pl => ({ id: pl.id, name: pl.name, isAlive: pl.isAlive, seatNumber: pl.seatNumber })),
               logs: gameState.logs,
               speakingIndex: gameState.speakingIndex,
@@ -449,14 +536,18 @@
       if (gameState.logs.length > 60) gameState.logs.shift();
     }
 
-    // 畫面 UI 渲染
     function renderUI() {
       document.getElementById('player-count').innerText = gameState.players.length;
       document.getElementById('max-player-count').innerText = gameState.maxPlayers;
 
+      const me = gameState.players.find(p => p.id === myId);
+
+      PlayerDeathHandler.updateDeathUI(me);
+
       playerList.innerHTML = gameState.players.map(p => {
         const isMe = p.id === myId;
         const isHostPlayer = p.id === gameState.players[0]?.id;
+        const isDead = !p.isAlive && gameState.phase !== 'LOBBY';
         
         let actionsHtml = '';
         if (isHostPlayer) {
@@ -465,8 +556,11 @@
           actionsHtml = `<button class="btn danger-sm" onclick="kickPlayer('${p.id}')">踢出</button>`;
         }
 
-        return `<li>
-          <span>${p.seatNumber ? p.seatNumber + '號 ' : ''}${p.name} ${isMe ? '(你)' : ''} ${!p.isAlive && gameState.phase !== 'LOBBY' ? '[已死亡]' : ''}</span>
+        const deadClass = isDead ? 'dead-player' : '';
+        const deadTag = isDead ? '<span class="dead-tag">[已死亡 ☠️]</span>' : '';
+
+        return `<li class="${deadClass}">
+          <span>${p.seatNumber ? p.seatNumber + '號 ' : ''}${p.name} ${isMe ? '(你)' : ''} ${deadTag}</span>
           <span>${actionsHtml}</span>
         </li>`;
       }).join('');
@@ -486,7 +580,6 @@
       renderActionPanel();
     }
 
-    // 渲染行動區塊
     function renderActionPanel() {
       actionButtons.innerHTML = '';
       actionStatus.innerText = '';
@@ -502,8 +595,9 @@
       }
 
       const me = gameState.players.find(p => p.id === myId);
+
       if (!me || !me.isAlive) {
-        actionStatus.innerText = '你已死亡，進入觀戰狀態。';
+        actionStatus.innerText = '☠️ 你已死亡，無法進行任何操作，已切換至觀戰狀態。';
         return;
       }
 
@@ -617,7 +711,6 @@
       }
     }
 
-    // 房主：重新開始遊戲程序
     function restartGame() {
       if (!isHost) return;
 
@@ -626,7 +719,6 @@
       gameState.votes = {};
       gameState.nightData = { wolfKill: null, witchHealUsed: false, witchPoisonUsed: false, witchPoisonKill: null };
       
-      // 重置所有玩家狀態
       gameState.players.forEach(p => {
         p.isAlive = true;
         p.role = '';
@@ -638,7 +730,6 @@
       syncAndRender();
     }
 
-    // 房主：推進發言順序
     function advanceSpeechTurn() {
       if (!isHost) return;
 
@@ -656,9 +747,10 @@
       syncAndRender();
     }
 
-    // 房主：處理核心遊戲邏輯與預言家查驗
     function processAction(peerId, action, targetId) {
       if (!isHost) return;
+
+      const oldPlayers = JSON.parse(JSON.stringify(gameState.players));
 
       if (action === 'WOLF_KILL') {
         gameState.nightData.wolfKill = targetId;
@@ -710,6 +802,8 @@
           knight.isAlive = false;
           addLog(`[決鬥] [${target.name}] 是好人！騎士 [${knight.name}] 決鬥失敗撞劍身亡！`);
         }
+
+        PlayerDeathHandler.processDeaths(oldPlayers, gameState.players);
         checkWinCondition();
       } else if (action === 'VOTE') {
         gameState.votes[peerId] = targetId;
@@ -745,6 +839,8 @@
             addLog(`[放逐結果] 出現平票 (最高票數為 ${maxVotes} 票)，本日無人被放逐！`);
           }
 
+          PlayerDeathHandler.processDeaths(oldPlayers, gameState.players);
+
           if (!checkWinCondition()) {
             setTimeout(() => {
               startNightPhase();
@@ -757,9 +853,10 @@
       syncAndRender();
     }
 
-    // 房主：黑夜結束，進入白天
     function finishNightPhase() {
+      const oldPlayers = JSON.parse(JSON.stringify(gameState.players));
       let deaths = [];
+
       if (gameState.nightData.wolfKill) {
         const v1 = gameState.players.find(p => p.id === gameState.nightData.wolfKill);
         if (v1) { v1.isAlive = false; deaths.push(`${v1.seatNumber}號 ${v1.name}`); }
@@ -778,6 +875,8 @@
         addLog(`[天亮] 昨晚是平安夜，無人死亡。`);
       }
 
+      PlayerDeathHandler.processDeaths(oldPlayers, gameState.players);
+
       const alivePlayers = gameState.players.filter(p => p.isAlive);
       if (alivePlayers.length > 0) {
         addLog(`[發言] 請依照座號順序發言，首先由 ${alivePlayers[0].seatNumber}號玩家 [${alivePlayers[0].name}] 開始發言。`);
@@ -787,7 +886,6 @@
       syncAndRender();
     }
 
-    // 房主：進入黑夜
     function startNightPhase() {
       gameState.phase = 'NIGHT_WOLF';
       gameState.nightData.wolfKill = null;
@@ -797,18 +895,17 @@
       syncAndRender();
     }
 
-    // 核心勝負判斷邏輯
     function checkWinCondition() {
       const aliveWolves = gameState.players.filter(p => p.isAlive && p.role === '狼人');
       const aliveGodsAndCivs = gameState.players.filter(p => p.isAlive && p.role !== '狼人');
 
       if (aliveWolves.length === 0) {
-        addLog('[勝負結算] 狼人已全部死亡，好人陣營獲得最終勝利！');
+        addLog('[勝負結算] 狼人已全部死亡（或無狼人），好人陣營獲得最終勝利！');
         gameState.phase = 'END';
         syncAndRender();
         return true;
       } else if (aliveWolves.length >= aliveGodsAndCivs.length) {
-        addLog(`[勝負結算] 狼人人數 (${aliveWolves.length}人) 已等於或超越好人人數 (${aliveGodsAndCivs.length}人)，狼人陣營獲得最終勝利！`);
+        addLog(`[勝負結算] 狼人人數 (${aliveWolves.length}人) 已等於或超越好人數 (${aliveGodsAndCivs.length}人)，狼人陣營獲得最終勝利！`);
         gameState.phase = 'END';
         syncAndRender();
         return true;
@@ -816,44 +913,55 @@
       return false;
     }
 
-    // 房主點擊開始遊戲
+    // 房主點擊開始遊戲：分配角色 logic
     document.getElementById('btn-start-game').addEventListener('click', () => {
       const count = gameState.players.length;
-      if (count < 6) {
-        return alert('遊玩人數不能低於 6 人！');
+      if (count < 2) {
+        return alert('遊玩人數不能低於 2 人！');
       }
 
-      // 重置女巫藥水使用紀錄
       gameState.nightData.witchHealUsed = false;
       gameState.nightData.witchPoisonUsed = false;
 
-      // 指定狼人人數邏輯：6-7人1狼、8-10人2狼、12人3狼、15-18人4狼
-      let wolfCount = 1;
-      if (count >= 8 && count <= 10) wolfCount = 2;
-      else if (count === 12) wolfCount = 3;
-      else if (count >= 15) wolfCount = 4;
+      // 可用角色清單 pool
+      const availableRoles = ['狼人', '預言家', '女巫', '騎士', '平民'];
 
-      // 基礎配置：狼人、預言家、女巫、騎士
-      let roles = [];
-      for (let i = 0; i < wolfCount; i++) roles.push('狼人');
-      roles.push('預言家', '女巫', '騎士');
+      if (gameState.roleMode === 'RANDOM') {
+        // 🎲 全隨機模式：每一一位玩家都獨立從角色池隨機抽一個
+        gameState.players.forEach((p, idx) => {
+          const randomIndex = Math.floor(Math.random() * availableRoles.length);
+          p.role = availableRoles[randomIndex];
+          p.isAlive = true;
+          p.seatNumber = idx + 1;
+        });
+        addLog(`[系統] 遊戲開始 (採用完全隨機模式，每位玩家獨立抽取職業)。`);
+      } else {
+        // ⚖️ 標準模式：按固定比例分配
+        let wolfCount = 1;
+        if (count >= 8 && count <= 10) wolfCount = 2;
+        else if (count === 12) wolfCount = 3;
+        else if (count >= 15) wolfCount = 4;
 
-      // 其餘全部補平民
-      while (roles.length < count) {
-        roles.push('平民');
+        let roles = [];
+        for (let i = 0; i < wolfCount; i++) roles.push('狼人');
+        roles.push('預言家', '女巫', '騎士');
+
+        while (roles.length < count) {
+          roles.push('平民');
+        }
+
+        roles.sort(() => Math.random() - 0.5);
+
+        gameState.players.forEach((p, idx) => {
+          p.role = roles[idx];
+          p.isAlive = true;
+          p.seatNumber = idx + 1;
+        });
+        addLog(`[系統] 遊戲開始 (採用標準配置模式，共 ${count} 人，含 ${wolfCount} 隻狼人)。`);
       }
 
-      // 洗牌分發角色
-      roles.sort(() => Math.random() - 0.5);
-
-      gameState.players.forEach((p, idx) => {
-        p.role = roles[idx];
-        p.isAlive = true;
-        p.seatNumber = idx + 1;
-      });
-
       gameState.logs = [];
-      addLog(`[系統] 遊戲開始 (共 ${count} 人，含 ${wolfCount} 隻狼人)。座位號碼已分配完畢。`);
+      addLog(`[系統] 所有玩家座位號碼已分配完畢。`);
       startNightPhase();
     });
 
