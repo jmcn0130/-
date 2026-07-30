@@ -179,13 +179,13 @@
 
     // 遊戲狀態
     let gameState = {
-      phase: 'LOBBY', // LOBBY, NIGHT_WOLF, NIGHT_SEER, NIGHT_WITCH, DAY_DISCUSSION, DAY_VOTE, END
-      players: [],    // { id, name, isAlive, role, seatNumber }
+      phase: 'LOBBY', 
+      players: [],    
       logs: [],
       speakingIndex: 0, 
       nightData: { wolfKill: null, witchHealUsed: false, witchPoisonUsed: false, witchPoisonKill: null },
       pendingActions: {},
-      votes: {}       // { voterId: targetId }
+      votes: {}       
     };
 
     let myRole = '';
@@ -288,6 +288,11 @@
         gameState = data.state;
         myRole = data.personalRole || myRole;
         renderUI();
+      } else if (data.type === 'PRIVATE_NOTICE') {
+        // 專門用於預言家查驗等私密結果通知
+        alert(data.msg);
+        addLog(`[私密資訊] ${data.msg}`);
+        renderUI();
       } else if (data.type === 'ERROR') {
         alert(data.msg);
       }
@@ -362,7 +367,7 @@
           createActionButton(`襲擊 ${p.seatNumber}號 ${p.name}`, () => sendAction('WOLF_KILL', p.id));
         });
       } else if (gameState.phase === 'NIGHT_SEER' && myRole === '預言家') {
-        actionStatus.innerText = '選擇查驗對象：';
+        actionStatus.innerText = '選擇查驗對象（系統將會告知對方的陣營）：';
         gameState.players.filter(p => p.isAlive && p.id !== myId).forEach(p => {
           createActionButton(`查驗 ${p.seatNumber}號 ${p.name}`, () => sendAction('SEER_CHECK', p.id));
         });
@@ -409,7 +414,7 @@
         }
 
       } else if (gameState.phase === 'DAY_VOTE') {
-        actionStatus.innerText = '發言完畢，請投下放逐票（選擇你想放逐的玩家）：';
+        actionStatus.innerText = '發言完畢，請投下放逐票：';
         gameState.players.filter(p => p.isAlive && p.id !== myId).forEach(p => {
           createActionButton(`投給 ${p.seatNumber}號 ${p.name}`, () => sendAction('VOTE', p.id));
         });
@@ -466,7 +471,7 @@
       syncAndRender();
     }
 
-    // 房主：處理核心遊戲邏輯與白天投票
+    // 房主：處理核心遊戲邏輯與預言家查驗
     function processAction(peerId, action, targetId) {
       if (!isHost) return;
 
@@ -477,11 +482,19 @@
       } else if (action === 'SEER_CHECK') {
         const target = gameState.players.find(p => p.id === targetId);
         const isWolf = target.role === '狼人';
-        
-        if (connections[peerId]) {
-          connections[peerId].send({ type: 'LOG', msg: `[查驗結果] ${target.seatNumber}號 ${target.name} 的陣營為：${isWolf ? '狼人' : '好人'}` });
-        } else if (peerId === myId) {
-          addLog(`[查驗結果] ${target.seatNumber}號 ${target.name} 的陣營為：${isWolf ? '狼人' : '好人'}`);
+        const resultMsg = `【查驗結果】${target.seatNumber}號玩家 [${target.name}] 的陣營為：${isWolf ? '狼人 (壞人)' : '好人'}`;
+
+        // 判定預言家是房主還是加入的客戶端
+        if (peerId === myId) {
+          // 房主自己是預言家
+          alert(resultMsg);
+          addLog(`[私密資訊] ${resultMsg}`);
+        } else if (connections[peerId]) {
+          // 客戶端是預言家，發送私密通知訊息
+          connections[peerId].send({
+            type: 'PRIVATE_NOTICE',
+            msg: resultMsg
+          });
         }
 
         gameState.phase = 'NIGHT_WITCH';
@@ -516,23 +529,19 @@
         gameState.votes[peerId] = targetId;
         const alivePlayers = gameState.players.filter(p => p.isAlive);
 
-        // 檢查是否所有存活玩家皆已投過票
         if (Object.keys(gameState.votes).length >= alivePlayers.length) {
           addLog('[投票結算] 所有玩家投票完畢，計算結果中...');
 
-          // 計票邏輯
-          const counts = {}; // { targetId: voteCount }
+          const counts = {}; 
           for (let voterId in gameState.votes) {
             const tId = gameState.votes[voterId];
             counts[tId] = (counts[tId] || 0) + 1;
             
-            // 記錄投票明細
             const voter = gameState.players.find(p => p.id === voterId);
             const target = gameState.players.find(p => p.id === tId);
             addLog(`-> ${voter.seatNumber}號 [${voter.name}] 投給了 ${target.seatNumber}號 [${target.name}]`);
           }
 
-          // 找出最高票數與獲得最高票的玩家清單
           let maxVotes = 0;
           for (let tId in counts) {
             if (counts[tId] > maxVotes) {
@@ -542,22 +551,18 @@
 
           const topVotedIds = Object.keys(counts).filter(tId => counts[tId] === maxVotes);
 
-          // 判斷平票與放逐邏輯
           if (topVotedIds.length === 1) {
-            // 只有一位最高票 -> 該玩家死亡（被放逐）
             const executed = gameState.players.find(p => p.id === topVotedIds[0]);
             executed.isAlive = false;
             addLog(`[放逐結果] 玩家 [${executed.seatNumber}號 ${executed.name}] 獲得最高票 (${maxVotes} 票)，被放逐死亡！`);
           } else {
-            // 多人平票 -> 無人被放逐
             addLog(`[放逐結果] 出現平票 (最高票數為 ${maxVotes} 票)，本日無人被放逐！`);
           }
 
-          // 檢查勝負條件，若無人獲勝則開啟下一夜
           if (!checkWinCondition()) {
             setTimeout(() => {
               startNightPhase();
-            }, 3000); // 留 3 秒給玩家瀏覽投票結果
+            }, 3000); 
           }
           return;
         }
