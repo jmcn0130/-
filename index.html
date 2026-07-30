@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRTC jun鼠叔的狼人殺</title>
+  <title>jun鼠叔的狼人殺</title>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -289,7 +289,6 @@
         myRole = data.personalRole || myRole;
         renderUI();
       } else if (data.type === 'PRIVATE_NOTICE') {
-        // 專門用於預言家查驗等私密結果通知
         alert(data.msg);
         addLog(`[私密資訊] ${data.msg}`);
         renderUI();
@@ -484,13 +483,10 @@
         const isWolf = target.role === '狼人';
         const resultMsg = `【查驗結果】${target.seatNumber}號玩家 [${target.name}] 的陣營為：${isWolf ? '狼人 (壞人)' : '好人'}`;
 
-        // 判定預言家是房主還是加入的客戶端
         if (peerId === myId) {
-          // 房主自己是預言家
           alert(resultMsg);
           addLog(`[私密資訊] ${resultMsg}`);
         } else if (connections[peerId]) {
-          // 客戶端是預言家，發送私密通知訊息
           connections[peerId].send({
             type: 'PRIVATE_NOTICE',
             msg: resultMsg
