@@ -61,6 +61,17 @@
     .btn.primary:hover { background: #b71c1c; }
     .btn.warning { background: #e65100; }
     .btn.warning:hover { background: #ef6c00; }
+    .btn.danger-sm {
+      background: #b71c1c;
+      color: #fff;
+      padding: 4px 10px;
+      font-size: 12px;
+      border-radius: 3px;
+      border: none;
+      cursor: pointer;
+      margin-left: 8px;
+    }
+    .btn.danger-sm:hover { background: #d32f2f; }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .hidden { display: none !important; }
@@ -155,7 +166,8 @@
         <b>遊戲規則與勝負判定：</b><br>
         1. <b>好人勝</b>：狼人全部死亡。<br>
         2. <b>狼人勝</b>：狼人數等於或大於好人數。<br>
-        3. <b>投票機制</b>：白天發言後進行投票，<b>最高票者放逐死亡</b>；若發生<b>平票則無人死亡</b>，直接進入下一夜。
+        3. <b>女巫藥水</b>：解藥與毒藥<b>整場遊戲各只能使用一次</b>。<br>
+        4. <b>投票機制</b>：白天發言後進行投票，<b>最高票者放逐死亡</b>；若發生<b>平票則無人死亡</b>，直接進入下一夜。
       </div>
 
       <!-- 房主設定區 -->
@@ -210,7 +222,7 @@
     // 遊戲狀態
     let gameState = {
       phase: 'LOBBY', 
-      maxPlayers: 6,  // 預設人數上限
+      maxPlayers: 6,
       players: [],    
       logs: [],
       speakingIndex: 0, 
@@ -285,6 +297,26 @@
       showCard(lobbyCard);
     });
 
+    // 房主踢人功能
+    function kickPlayer(targetId) {
+      if (!isHost || gameState.phase !== 'LOBBY') return;
+      const target = gameState.players.find(p => p.id === targetId);
+      if (!target) return;
+
+      if (confirm(`確定要將玩家 [${target.name}] 踢出房間嗎？`)) {
+        // 發送通知給被踢出的玩家
+        if (connections[targetId]) {
+          connections[targetId].send({ type: 'KICKED', msg: '你已被房主踢出房間。' });
+          connections[targetId].close();
+          delete connections[targetId];
+        }
+
+        gameState.players = gameState.players.filter(p => p.id !== targetId);
+        addLog(`[系統] 房主已將 [${target.name}] 踢出房間。`);
+        syncAndRender();
+      }
+    }
+
     // 房主更改人數上限選單事件
     maxPlayersSelect.addEventListener('change', (e) => {
       if (!isHost) return;
@@ -341,7 +373,7 @@
 
         const existingPlayer = gameState.players.find(p => p.id === peerId);
 
-        // 人數上限檢查 (非舊玩家重新連線的情況下)
+        // 人數上限檢查
         if (!existingPlayer && gameState.players.length >= gameState.maxPlayers) {
           if (connections[peerId]) {
             connections[peerId].send({ type: 'ERROR', msg: `房間人數已滿 (上限 ${gameState.maxPlayers} 人)，無法加入！` });
@@ -373,9 +405,12 @@
         alert(data.msg);
         addLog(`[私密資訊] ${data.msg}`);
         renderUI();
+      } else if (data.type === 'KICKED') {
+        alert(data.msg);
+        location.reload();
       } else if (data.type === 'ERROR') {
         alert(data.msg);
-        location.reload(); // 發生無法加入等重大錯誤時刷新頁面重來
+        location.reload();
       }
     }
 
@@ -394,7 +429,11 @@
               players: gameState.players.map(pl => ({ id: pl.id, name: pl.name, isAlive: pl.isAlive, seatNumber: pl.seatNumber })),
               logs: gameState.logs,
               speakingIndex: gameState.speakingIndex,
-              nightData: { wolfKill: gameState.nightData.wolfKill }
+              nightData: { 
+                wolfKill: gameState.nightData.wolfKill,
+                witchHealUsed: gameState.nightData.witchHealUsed,
+                witchPoisonUsed: gameState.nightData.witchPoisonUsed
+              }
             },
             personalRole: p.role
           });
@@ -415,9 +454,22 @@
       document.getElementById('player-count').innerText = gameState.players.length;
       document.getElementById('max-player-count').innerText = gameState.maxPlayers;
 
-      playerList.innerHTML = gameState.players.map(p => 
-        `<li><span>${p.seatNumber ? p.seatNumber + '號 ' : ''}${p.name} ${p.id === myId ? '(你)' : ''} ${!p.isAlive ? '[已死亡]' : ''}</span>${p.id === gameState.players[0]?.id ? '<span class="tag">房主</span>' : ''}</li>`
-      ).join('');
+      playerList.innerHTML = gameState.players.map(p => {
+        const isMe = p.id === myId;
+        const isHostPlayer = p.id === gameState.players[0]?.id;
+        
+        let actionsHtml = '';
+        if (isHostPlayer) {
+          actionsHtml = '<span class="tag">房主</span>';
+        } else if (isHost && gameState.phase === 'LOBBY') {
+          actionsHtml = `<button class="btn danger-sm" onclick="kickPlayer('${p.id}')">踢出</button>`;
+        }
+
+        return `<li>
+          <span>${p.seatNumber ? p.seatNumber + '號 ' : ''}${p.name} ${isMe ? '(你)' : ''} ${!p.isAlive ? '[已死亡]' : ''}</span>
+          <span>${actionsHtml}</span>
+        </li>`;
+      }).join('');
 
       if (gameState.phase === 'LOBBY') {
         showCard(lobbyCard);
@@ -460,14 +512,34 @@
         let statusMsg = victim ? `昨晚遇害的是：${victim.seatNumber}號 ${victim.name}` : '昨晚無人遇害。';
         actionStatus.innerText = statusMsg;
 
-        if (victim && !gameState.nightData.witchHealUsed) {
-          createActionButton(`使用解藥救活 ${victim.name}`, () => sendAction('WITCH_HEAL', victim.id));
+        // 解藥邏輯判定 (僅限一次)
+        if (victim) {
+          if (!gameState.nightData.witchHealUsed) {
+            createActionButton(`使用解藥救活 ${victim.name}`, () => sendAction('WITCH_HEAL', victim.id));
+          } else {
+            const pNote = document.createElement('p');
+            pNote.style.color = '#888';
+            pNote.style.fontSize = '12px';
+            pNote.style.margin = '4px 0';
+            pNote.innerText = '（你的解藥已使用過）';
+            actionButtons.appendChild(pNote);
+          }
         }
+
+        // 毒藥邏輯判定 (僅限一次)
         if (!gameState.nightData.witchPoisonUsed) {
           gameState.players.filter(p => p.isAlive && p.id !== myId).forEach(p => {
             createActionButton(`使用毒藥毒殺 ${p.seatNumber}號 ${p.name}`, () => sendAction('WITCH_POISON', p.id));
           });
+        } else {
+          const pNote = document.createElement('p');
+          pNote.style.color = '#888';
+          pNote.style.fontSize = '12px';
+          pNote.style.margin = '4px 0';
+          pNote.innerText = '（你的毒藥已使用過）';
+          actionButtons.appendChild(pNote);
         }
+
         createActionButton('不使用任何藥水', () => sendAction('SKIP', null));
 
       } else if (gameState.phase === 'DAY_DISCUSSION') {
@@ -581,13 +653,17 @@
         gameState.phase = 'NIGHT_WITCH';
         addLog('[黑夜] 預言家已完成查驗，女巫請睜眼。');
       } else if (action === 'WITCH_HEAL') {
-        gameState.nightData.wolfKill = null;
-        gameState.nightData.witchHealUsed = true;
+        if (!gameState.nightData.witchHealUsed) {
+          gameState.nightData.wolfKill = null;
+          gameState.nightData.witchHealUsed = true;
+        }
         finishNightPhase();
         return;
       } else if (action === 'WITCH_POISON') {
-        gameState.nightData.witchPoisonKill = targetId;
-        gameState.nightData.witchPoisonUsed = true;
+        if (!gameState.nightData.witchPoisonUsed) {
+          gameState.nightData.witchPoisonKill = targetId;
+          gameState.nightData.witchPoisonUsed = true;
+        }
         finishNightPhase();
         return;
       } else if (action === 'SKIP') {
@@ -717,13 +793,15 @@
         return alert('遊玩人數不能低於 6 人！');
       }
 
+      // 重置女巫藥水使用紀錄
+      gameState.nightData.witchHealUsed = false;
+      gameState.nightData.witchPoisonUsed = false;
+
       // 動態角色配置
       let roles = ['狼人', '狼人', '預言家', '女巫', '騎士'];
-      // 若人數達到 9 人以上，多加一張狼人卡
       if (gameState.players.length >= 9) {
         roles.push('狼人');
       }
-      // 剩餘位置補平民
       while (roles.length < gameState.players.length) {
         roles.push('平民');
       }
