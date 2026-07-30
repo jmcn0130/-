@@ -102,6 +102,18 @@
     .log-item { margin-bottom: 6px; border-bottom: 1px solid #222; padding-bottom: 4px; color: #ccc; }
     .action-box { background: #2a2a2a; padding: 15px; border-radius: 4px; border: 1px solid #3a3a3a; }
     .status-text { margin-top: 10px; font-size: 14px; color: #ffb74d; text-align: center; font-weight: bold; }
+    
+    .rules-box {
+      background: #181818;
+      border: 1px solid #2a2a2a;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      font-size: 13px;
+      color: #aaa;
+      line-height: 1.5;
+    }
+    .rules-box b { color: #ddd; }
   </style>
 </head>
 <body>
@@ -123,6 +135,13 @@
     <div id="lobby-card" class="card hidden">
       <h2>遊戲大廳 <span id="room-tag" class="tag"></span></h2>
       <p style="margin-bottom: 10px;">房間代碼：<b id="room-code-display" style="color: #ff8f00;"></b></p>
+
+      <div class="rules-box">
+        <b>遊戲規則與勝負判定：</b><br>
+        1. <b>好人勝</b>：狼人全部死亡。<br>
+        2. <b>狼人勝</b>：狼人數等於或大於好人數。<br>
+        3. <b>投票機制</b>：白天發言後進行投票，<b>最高票者放逐死亡</b>；若發生<b>平票則無人死亡</b>，直接進入下一夜。
+      </div>
       
       <h3>玩家列表 (<span id="player-count">0</span> / 最少 6 人)</h3>
       <ul id="player-list"></ul>
@@ -158,15 +177,15 @@
     let myName = '';
     let isHost = false;
 
-    // 遊戲狀態 (由房主維護並全網廣播)
+    // 遊戲狀態
     let gameState = {
       phase: 'LOBBY', // LOBBY, NIGHT_WOLF, NIGHT_SEER, NIGHT_WITCH, DAY_DISCUSSION, DAY_VOTE, END
       players: [],    // { id, name, isAlive, role, seatNumber }
       logs: [],
-      speakingIndex: 0, // 目前輪到第幾位玩家發言
+      speakingIndex: 0, 
       nightData: { wolfKill: null, witchHealUsed: false, witchPoisonUsed: false, witchPoisonKill: null },
       pendingActions: {},
-      votes: {}
+      votes: {}       // { voterId: targetId }
     };
 
     let myRole = '';
@@ -288,7 +307,7 @@
               players: gameState.players.map(pl => ({ id: pl.id, name: pl.name, isAlive: pl.isAlive, seatNumber: pl.seatNumber })),
               logs: gameState.logs,
               speakingIndex: gameState.speakingIndex,
-              nightData: { wolfKill: gameState.nightData.wolfKill } // 僅傳遞不敏感的夜晚動向
+              nightData: { wolfKill: gameState.nightData.wolfKill }
             },
             personalRole: p.role
           });
@@ -337,7 +356,6 @@
         return;
       }
 
-      // 夜間階段控制
       if (gameState.phase === 'NIGHT_WOLF' && myRole === '狼人') {
         actionStatus.innerText = '選擇今晚襲擊目標：';
         gameState.players.filter(p => p.isAlive).forEach(p => {
@@ -363,7 +381,6 @@
         }
         createActionButton('不使用任何藥水', () => sendAction('SKIP', null));
 
-      // 白天發言階段控制
       } else if (gameState.phase === 'DAY_DISCUSSION') {
         const alivePlayers = gameState.players.filter(p => p.isAlive);
         const currentSpeaker = alivePlayers[gameState.speakingIndex];
@@ -376,7 +393,6 @@
             actionStatus.innerText = `正在等待 ${currentSpeaker.seatNumber}號玩家 [${currentSpeaker.name}] 發言中...`;
           }
 
-          // 騎士可隨時發動決鬥
           if (myRole === '騎士') {
             const knightSkillDiv = document.createElement('div');
             knightSkillDiv.style.marginTop = '15px';
@@ -392,11 +408,10 @@
           }
         }
 
-      // 白天投票階段控制
       } else if (gameState.phase === 'DAY_VOTE') {
-        actionStatus.innerText = '發言完畢，請投下放逐票：';
+        actionStatus.innerText = '發言完畢，請投下放逐票（選擇你想放逐的玩家）：';
         gameState.players.filter(p => p.isAlive && p.id !== myId).forEach(p => {
-          createActionButton(`放逐 ${p.seatNumber}號 ${p.name}`, () => sendAction('VOTE', p.id));
+          createActionButton(`投給 ${p.seatNumber}號 ${p.name}`, () => sendAction('VOTE', p.id));
         });
       } else {
         actionStatus.innerText = '請等待其他玩家完成動作...';
@@ -413,7 +428,7 @@
 
     function sendAction(actionType, targetId) {
       actionButtons.innerHTML = '';
-      actionStatus.innerText = '動作已提交，等待階段完成...';
+      actionStatus.innerText = '動作已提交，等待其他玩家...';
 
       if (isHost) {
         processAction(myId, actionType, targetId);
@@ -433,7 +448,7 @@
       }
     }
 
-    // 房主：推進討論發言順序
+    // 房主：推進發言順序
     function advanceSpeechTurn() {
       if (!isHost) return;
 
@@ -441,10 +456,9 @@
       gameState.speakingIndex++;
 
       if (gameState.speakingIndex >= alivePlayers.length) {
-        // 全員發言完畢，進入投票
         gameState.phase = 'DAY_VOTE';
         gameState.votes = {};
-        addLog('[系統] 所有玩家發言完畢，進入投票放逐階段。');
+        addLog('[系統] 所有玩家發言完畢，進入【投票放逐階段】。');
       } else {
         const nextSpeaker = alivePlayers[gameState.speakingIndex];
         addLog(`[發言] 輪到 ${nextSpeaker.seatNumber}號玩家 [${nextSpeaker.name}] 發言。`);
@@ -452,7 +466,7 @@
       syncAndRender();
     }
 
-    // 房主：處理核心遊戲邏輯與技能
+    // 房主：處理核心遊戲邏輯與白天投票
     function processAction(peerId, action, targetId) {
       if (!isHost) return;
 
@@ -464,7 +478,6 @@
         const target = gameState.players.find(p => p.id === targetId);
         const isWolf = target.role === '狼人';
         
-        // 單獨給預言家發送查驗結果 Log
         if (connections[peerId]) {
           connections[peerId].send({ type: 'LOG', msg: `[查驗結果] ${target.seatNumber}號 ${target.name} 的陣營為：${isWolf ? '狼人' : '好人'}` });
         } else if (peerId === myId) {
@@ -503,28 +516,49 @@
         gameState.votes[peerId] = targetId;
         const alivePlayers = gameState.players.filter(p => p.isAlive);
 
+        // 檢查是否所有存活玩家皆已投過票
         if (Object.keys(gameState.votes).length >= alivePlayers.length) {
-          const counts = {};
-          Object.values(gameState.votes).forEach(tId => counts[tId] = (counts[tId] || 0) + 1);
+          addLog('[投票結算] 所有玩家投票完畢，計算結果中...');
 
+          // 計票邏輯
+          const counts = {}; // { targetId: voteCount }
+          for (let voterId in gameState.votes) {
+            const tId = gameState.votes[voterId];
+            counts[tId] = (counts[tId] || 0) + 1;
+            
+            // 記錄投票明細
+            const voter = gameState.players.find(p => p.id === voterId);
+            const target = gameState.players.find(p => p.id === tId);
+            addLog(`-> ${voter.seatNumber}號 [${voter.name}] 投給了 ${target.seatNumber}號 [${target.name}]`);
+          }
+
+          // 找出最高票數與獲得最高票的玩家清單
           let maxVotes = 0;
-          let executedId = null;
           for (let tId in counts) {
             if (counts[tId] > maxVotes) {
               maxVotes = counts[tId];
-              executedId = tId;
             }
           }
 
-          const executed = gameState.players.find(p => p.id === executedId);
-          if (executed) {
+          const topVotedIds = Object.keys(counts).filter(tId => counts[tId] === maxVotes);
+
+          // 判斷平票與放逐邏輯
+          if (topVotedIds.length === 1) {
+            // 只有一位最高票 -> 該玩家死亡（被放逐）
+            const executed = gameState.players.find(p => p.id === topVotedIds[0]);
             executed.isAlive = false;
-            addLog(`[投票結算] 玩家 [${executed.seatNumber}號 ${executed.name}] 被投票放逐。`);
+            addLog(`[放逐結果] 玩家 [${executed.seatNumber}號 ${executed.name}] 獲得最高票 (${maxVotes} 票)，被放逐死亡！`);
           } else {
-            addLog(`[投票結算] 同票，本日無人被放逐。`);
+            // 多人平票 -> 無人被放逐
+            addLog(`[放逐結果] 出現平票 (最高票數為 ${maxVotes} 票)，本日無人被放逐！`);
           }
 
-          startNightPhase();
+          // 檢查勝負條件，若無人獲勝則開啟下一夜
+          if (!checkWinCondition()) {
+            setTimeout(() => {
+              startNightPhase();
+            }, 3000); // 留 3 秒給玩家瀏覽投票結果
+          }
           return;
         }
       }
@@ -562,7 +596,7 @@
       syncAndRender();
     }
 
-    // 房主：開始進入黑夜
+    // 房主：進入黑夜
     function startNightPhase() {
       gameState.phase = 'NIGHT_WOLF';
       gameState.nightData.wolfKill = null;
@@ -572,38 +606,41 @@
       syncAndRender();
     }
 
-    // 勝負判斷
+    // 核心勝負判斷邏輯
     function checkWinCondition() {
       const aliveWolves = gameState.players.filter(p => p.isAlive && p.role === '狼人');
       const aliveGodsAndCivs = gameState.players.filter(p => p.isAlive && p.role !== '狼人');
 
       if (aliveWolves.length === 0) {
-        addLog('[結束] 好人陣營獲得最終勝利！');
+        addLog('[勝負結算] 狼人已全部死亡，好人陣營獲得最終勝利！');
         gameState.phase = 'END';
+        syncAndRender();
+        return true;
       } else if (aliveWolves.length >= aliveGodsAndCivs.length) {
-        addLog('[結束] 狼人陣營獲得最終勝利！');
+        addLog(`[勝負結算] 狼人人數 (${aliveWolves.length}人) 已等於或超越好人人數 (${aliveGodsAndCivs.length}人)，狼人陣營獲得最終勝利！`);
         gameState.phase = 'END';
+        syncAndRender();
+        return true;
       }
+      return false;
     }
 
-    // 房主點擊開始遊戲 (最低限制 6 人)
+    // 房主點擊開始遊戲
     document.getElementById('btn-start-game').addEventListener('click', () => {
       if (gameState.players.length < 6) {
         return alert('遊玩人數不能低於 6 人！');
       }
 
-      // 人數分配：2 狼人、1 預言家、1 女巫、1 騎士、其餘平民
       let roles = ['狼人', '狼人', '預言家', '女巫', '騎士'];
       while (roles.length < gameState.players.length) {
         roles.push('平民');
       }
       roles.sort(() => Math.random() - 0.5);
 
-      // 分配角色與號碼牌
       gameState.players.forEach((p, idx) => {
         p.role = roles[idx];
         p.isAlive = true;
-        p.seatNumber = idx + 1; // 1 ~ N 號
+        p.seatNumber = idx + 1;
       });
 
       gameState.logs = [];
@@ -622,7 +659,7 @@
         case 'NIGHT_SEER': return '黑夜 - 預言家行動';
         case 'NIGHT_WITCH': return '黑夜 - 女巫行動';
         case 'DAY_DISCUSSION': return '白天 - 順序發言討論';
-        case 'DAY_VOTE': return '白天 - 投票放逐';
+        case 'DAY_VOTE': return '白天 - 投票放逐階段';
         case 'END': return '遊戲結束';
         default: return '等待中';
       }
