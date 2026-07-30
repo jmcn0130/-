@@ -1,10 +1,16 @@
 <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>jun鼠叔的狼人殺</title>
+  <!-- PeerJS -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <!-- Firebase SDK (用作房間大廳目錄) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -61,6 +67,16 @@
     .btn.primary:hover { background: #b71c1c; }
     .btn.warning { background: #e65100; }
     .btn.warning:hover { background: #ef6c00; }
+    .btn.success-sm {
+      background: #2e7d32;
+      color: #fff;
+      padding: 6px 12px;
+      font-size: 13px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+    }
+    .btn.success-sm:hover { background: #388e3c; }
     .btn.danger-sm {
       background: #b71c1c;
       color: #fff;
@@ -88,6 +104,25 @@
       align-items: center;
       border-left: 3px solid #555;
       transition: all 0.3s ease;
+    }
+
+    /* 房間列表項目專用 */
+    .room-item {
+      border-left-color: #2196f3;
+      background: #252a30;
+    }
+    .room-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .room-title {
+      font-weight: bold;
+      color: #fff;
+    }
+    .room-details {
+      font-size: 12px;
+      color: #aaa;
     }
 
     /* 死亡玩家列表樣式 */
@@ -174,21 +209,36 @@
       color: #ffb74d;
       font-weight: bold;
     }
+    .empty-list-msg {
+      text-align: center;
+      color: #777;
+      font-size: 13px;
+      padding: 15px 0;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>jun鼠叔的狼人殺</h1>
 
-    <!-- 步驟 1: 登入/建立房間 -->
+    <!-- 步驟 1: 登入與大廳房間列表 -->
     <div id="login-card" class="card">
       <h2>玩家設定</h2>
       <input type="text" id="username" placeholder="輸入你的暱稱" value="玩家A">
-      <hr>
       <button id="btn-create-room" class="btn primary">創建新房間 (擔任房主)</button>
-      <div style="margin: 12px 0; text-align: center; font-size: 14px; color: #888;">或</div>
+      
+      <hr>
+
+      <!-- 新增：線上房間大廳列表 -->
+      <h2>公開房間列表</h2>
+      <ul id="public-room-list">
+        <li class="empty-list-msg">正在載入大廳房間列表...</li>
+      </ul>
+
+      <hr>
+      <p style="font-size: 13px; color: #888; margin-bottom: 6px;">手動加入特定房間：</p>
       <input type="text" id="room-id-input" placeholder="輸入房間代碼">
-      <button id="btn-join-room" class="btn">加入房間</button>
+      <button id="btn-join-room" class="btn">手動代碼加入</button>
     </div>
 
     <!-- 步驟 2: 遊戲等待大廳 -->
@@ -198,7 +248,7 @@
 
       <div class="rules-box">
         <b>遊戲規則與勝負判定：</b><br>
-        1. <b>好人勝</b>：狼人全部死亡（或開局無狼人）。<br>
+        1. <b>好人勝</b>：狼人全部死亡。<br>
         2. <b>狼人勝</b>：狼人數等於或大於好人數。<br>
         3. <b>女巫藥水</b>：解藥與毒藥<b>整場遊戲各只能使用一次</b>。<br>
         4. <b>投票機制</b>：白天發言後進行投票，<b>最高票者放逐死亡</b>；若發生<b>平票則無人死亡</b>，直接進入下一夜。
@@ -208,20 +258,14 @@
       <div id="host-settings" class="setting-group hidden">
         <label for="max-players-select">自訂房間人數上限：</label>
         <select id="max-players-select">
-          <option value="6">6 人</option>
-          <option value="7">7 人</option>
-          <option value="8">8 人</option>
-          <option value="9">9 人</option>
-          <option value="10">10 人</option>
-          <option value="12">12 人</option>
-          <option value="15">15 人</option>
-          <option value="18">18 人</option>
-        </select>
-
-        <label for="role-mode-select" style="margin-top: 10px;">職業分配模式：</label>
-        <select id="role-mode-select">
-          <option value="RANDOM">🎲 完全隨機 (每位玩家獨立隨機抽職業，角色可重複)</option>
-          <option value="STANDARD">⚖️ 標準配置 (依人數預設狼人與神職比例)</option>
+          <option value="6">6 人 (1 狼人)</option>
+          <option value="7">7 人 (1 狼人)</option>
+          <option value="8">8 人 (2 狼人)</option>
+          <option value="9">9 人 (2 狼人)</option>
+          <option value="10">10 人 (2 狼人)</option>
+          <option value="12">12 人 (3 狼人)</option>
+          <option value="15">15 人 (4 狼人)</option>
+          <option value="18">18 人 (4 狼人)</option>
         </select>
       </div>
       
@@ -236,7 +280,7 @@
 
     <!-- 步驟 3: 遊戲主畫面 -->
     <div id="game-card" class="card hidden">
-      <!-- 玩家死亡提示橫條 (預設隱藏) -->
+      <!-- 玩家死亡提示橫條 -->
       <div id="death-banner" class="death-banner hidden">
         ☠️ 你已經死亡，目前處於觀戰模式。
       </div>
@@ -257,18 +301,28 @@
   </div>
 
   <script>
+    // ==========================================
+    // 免費 Firebase 大廳資料庫初始化 (公共房間廣播用)
+    // ==========================================
+    const firebaseConfig = {
+      databaseURL: "https://werewolf-lobby-default-rtdb.asia-southeast1.firebasedatabase.app"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const roomsRef = db.ref('werewolf_rooms');
+
     let peer = null;
     let connections = {};
     let hostConn = null;
     let myId = '';
     let myName = '';
     let isHost = false;
+    let currentRoomId = '';
 
     // 遊戲狀態
     let gameState = {
       phase: 'LOBBY', 
       maxPlayers: 6,
-      roleMode: 'RANDOM', // 新增：預設為隨機分配模式
       players: [],    
       logs: [],
       speakingIndex: 0, 
@@ -285,13 +339,77 @@
     const deathBanner = document.getElementById('death-banner');
     const usernameInput = document.getElementById('username');
     const playerList = document.getElementById('player-list');
+    const publicRoomList = document.getElementById('public-room-list');
     const logBox = document.getElementById('game-log');
     const actionButtons = document.getElementById('action-buttons');
     const actionStatus = document.getElementById('action-status');
     const maxPlayersSelect = document.getElementById('max-players-select');
-    const roleModeSelect = document.getElementById('role-mode-select');
 
+    // 監聽公用房間大廳動態
+    roomsRef.on('value', (snapshot) => {
+      const data = snapshot.val();
+      renderPublicRooms(data);
+    });
+
+    // 渲染大廳所有房間
+    function renderPublicRooms(roomsData) {
+      if (!roomsData) {
+        publicRoomList.innerHTML = '<li class="empty-list-msg">目前沒有開啟中的房間，快來創建一個吧！</li>';
+        return;
+      }
+
+      let html = '';
+      let hasRoom = false;
+
+      for (let rId in roomsData) {
+        const r = roomsData[rId];
+        // 僅顯示等待中且未額滿的房間
+        if (r && r.status === 'LOBBY') {
+          hasRoom = true;
+          const isFull = r.currentCount >= r.maxPlayers;
+          html += `
+            <li class="room-item">
+              <div class="room-info">
+                <span class="room-title">房主: ${r.hostName}</span>
+                <span class="room-details">代碼: ${rId} | 人數: ${r.currentCount}/${r.maxPlayers}</span>
+              </div>
+              <button class="btn success-sm" ${isFull ? 'disabled' : ''} onclick="joinRoomById('${rId}')">
+                ${isFull ? '已額滿' : '加入'}
+              </button>
+            </li>
+          `;
+        }
+      }
+
+      publicRoomList.innerHTML = hasRoom ? html : '<li class="empty-list-msg">目前沒有等待中的房間。</li>';
+    }
+
+    // 更新公開大廳上的房間資訊 (僅房主執行)
+    function updateLobbyServer() {
+      if (!isHost || !currentRoomId) return;
+      
+      const roomRef = db.ref('werewolf_rooms/' + currentRoomId);
+      roomRef.set({
+        hostName: myName,
+        currentCount: gameState.players.length,
+        maxPlayers: gameState.maxPlayers,
+        status: gameState.phase
+      });
+
+      // 當房主斷線或關閉分頁時自動從大廳移除房間
+      roomRef.onDisconnect().remove();
+    }
+
+    // 移除房間廣播
+    function removeLobbyServer() {
+      if (isHost && currentRoomId) {
+        db.ref('werewolf_rooms/' + currentRoomId).remove();
+      }
+    }
+
+    // ==========================================
     // 死亡系統 (Death System) 模組
+    // ==========================================
     const PlayerDeathHandler = {
       processDeaths: function(previousPlayersState, currentPlayers) {
         if (!previousPlayersState) return;
@@ -341,18 +459,19 @@
       myName = usernameInput.value.trim() || '房主';
       isHost = true;
       
-      const roomId = 'room-' + Math.random().toString(36).substring(2, 7);
-      await initPeer(roomId);
+      currentRoomId = 'room-' + Math.random().toString(36).substring(2, 7);
+      await initPeer(currentRoomId);
 
-      document.getElementById('room-code-display').innerText = roomId;
+      document.getElementById('room-code-display').innerText = currentRoomId;
       document.getElementById('room-tag').innerText = '房主';
       document.getElementById('host-controls').classList.remove('hidden');
       document.getElementById('host-settings').classList.remove('hidden');
       document.getElementById('client-waiting-msg').classList.add('hidden');
 
       gameState.maxPlayers = parseInt(maxPlayersSelect.value, 10);
-      gameState.roleMode = roleModeSelect.value;
       gameState.players = [{ id: myId, name: myName, isAlive: true, role: '', seatNumber: 0 }];
+      
+      updateLobbyServer();
       syncAndRender();
 
       peer.on('connection', (conn) => {
@@ -367,6 +486,7 @@
           if (gameState.phase === 'LOBBY') {
             gameState.players = gameState.players.filter(p => p.id !== conn.peer);
             addLog(`[系統] 玩家離線，已移出房間。`);
+            updateLobbyServer();
             syncAndRender();
           }
         });
@@ -375,6 +495,7 @@
       showCard(lobbyCard);
     });
 
+    // 房主踢人功能
     function kickPlayer(targetId) {
       if (!isHost || gameState.phase !== 'LOBBY') return;
       const target = gameState.players.find(p => p.id === targetId);
@@ -389,6 +510,7 @@
 
         gameState.players = gameState.players.filter(p => p.id !== targetId);
         addLog(`[系統] 房主已將 [${target.name}] 踢出房間。`);
+        updateLobbyServer();
         syncAndRender();
       }
     }
@@ -404,19 +526,17 @@
       }
       gameState.maxPlayers = newMax;
       addLog(`[房主設定] 人數上限已調整為 ${newMax} 人。`);
+      updateLobbyServer();
       syncAndRender();
     });
 
-    // 房主更改職業模式選單事件
-    roleModeSelect.addEventListener('change', (e) => {
-      if (!isHost) return;
-      gameState.roleMode = e.target.value;
-      const modeText = gameState.roleMode === 'RANDOM' ? '完全隨機' : '標準配置';
-      addLog(`[房主設定] 職業模式已調整為：${modeText}。`);
-      syncAndRender();
-    });
+    // 點擊列表按鈕加入房間
+    window.joinRoomById = function(targetRoomId) {
+      document.getElementById('room-id-input').value = targetRoomId;
+      document.getElementById('btn-join-room').click();
+    };
 
-    // 客戶端加入房間
+    // 客戶端加入房間邏輯
     document.getElementById('btn-join-room').addEventListener('click', async () => {
       const btnJoin = document.getElementById('btn-join-room');
       myName = usernameInput.value.trim() || '玩家';
@@ -444,6 +564,7 @@
       setTimeout(() => { btnJoin.disabled = false; }, 3000);
     });
 
+    // 房主處理解析訊息
     function handleHostMessage(peerId, data) {
       if (!isHost) return;
 
@@ -470,6 +591,7 @@
           gameState.players.push({ id: peerId, name: data.name, isAlive: true, role: '', seatNumber: 0 });
           addLog(`[系統] ${data.name} 加入了房間。`);
         }
+        updateLobbyServer();
         syncAndRender();
       } else if (data.type === 'SUBMIT_ACTION') {
         processAction(peerId, data.action, data.targetId);
@@ -480,6 +602,7 @@
       }
     }
 
+    // 客戶端接收訊息
     function handleClientMessage(data) {
       if (data.type === 'SYNC_STATE') {
         const oldPlayers = gameState.players;
@@ -501,6 +624,7 @@
       }
     }
 
+    // 同步狀態給所有玩家
     function syncAndRender() {
       if (!isHost) return;
 
@@ -512,7 +636,6 @@
             state: {
               phase: gameState.phase,
               maxPlayers: gameState.maxPlayers,
-              roleMode: gameState.roleMode,
               players: gameState.players.map(pl => ({ id: pl.id, name: pl.name, isAlive: pl.isAlive, seatNumber: pl.seatNumber })),
               logs: gameState.logs,
               speakingIndex: gameState.speakingIndex,
@@ -536,6 +659,7 @@
       if (gameState.logs.length > 60) gameState.logs.shift();
     }
 
+    // 畫面 UI 渲染
     function renderUI() {
       document.getElementById('player-count').innerText = gameState.players.length;
       document.getElementById('max-player-count').innerText = gameState.maxPlayers;
@@ -580,6 +704,7 @@
       renderActionPanel();
     }
 
+    // 渲染行動區塊
     function renderActionPanel() {
       actionButtons.innerHTML = '';
       actionStatus.innerText = '';
@@ -711,6 +836,7 @@
       }
     }
 
+    // 房主：重新開始遊戲程序
     function restartGame() {
       if (!isHost) return;
 
@@ -727,9 +853,11 @@
 
       addLog('====================================');
       addLog('[系統] 房主重置了遊戲，返回等待大廳。');
+      updateLobbyServer();
       syncAndRender();
     }
 
+    // 房主：推進發言順序
     function advanceSpeechTurn() {
       if (!isHost) return;
 
@@ -747,6 +875,7 @@
       syncAndRender();
     }
 
+    // 房主：處理核心遊戲邏輯與死亡處理
     function processAction(peerId, action, targetId) {
       if (!isHost) return;
 
@@ -853,6 +982,7 @@
       syncAndRender();
     }
 
+    // 房主：黑夜結束，進入白天
     function finishNightPhase() {
       const oldPlayers = JSON.parse(JSON.stringify(gameState.players));
       let deaths = [];
@@ -886,6 +1016,7 @@
       syncAndRender();
     }
 
+    // 房主：進入黑夜
     function startNightPhase() {
       gameState.phase = 'NIGHT_WOLF';
       gameState.nightData.wolfKill = null;
@@ -895,17 +1026,18 @@
       syncAndRender();
     }
 
+    // 核心勝負判斷邏輯
     function checkWinCondition() {
       const aliveWolves = gameState.players.filter(p => p.isAlive && p.role === '狼人');
       const aliveGodsAndCivs = gameState.players.filter(p => p.isAlive && p.role !== '狼人');
 
       if (aliveWolves.length === 0) {
-        addLog('[勝負結算] 狼人已全部死亡（或無狼人），好人陣營獲得最終勝利！');
+        addLog('[勝負結算] 狼人已全部死亡，好人陣營獲得最終勝利！');
         gameState.phase = 'END';
         syncAndRender();
         return true;
       } else if (aliveWolves.length >= aliveGodsAndCivs.length) {
-        addLog(`[勝負結算] 狼人人數 (${aliveWolves.length}人) 已等於或超越好人數 (${aliveGodsAndCivs.length}人)，狼人陣營獲得最終勝利！`);
+        addLog(`[勝負結算] 狼人人數 (${aliveWolves.length}人) 已等於或超越好人人數 (${aliveGodsAndCivs.length}人)，狼人陣營獲得最終勝利！`);
         gameState.phase = 'END';
         syncAndRender();
         return true;
@@ -913,55 +1045,43 @@
       return false;
     }
 
-    // 房主點擊開始遊戲：分配角色 logic
+    // 房主點擊開始遊戲
     document.getElementById('btn-start-game').addEventListener('click', () => {
       const count = gameState.players.length;
-      if (count < 2) {
-        return alert('遊玩人數不能低於 2 人！');
+      if (count < 6) {
+        return alert('遊玩人數不能低於 6 人！');
       }
 
       gameState.nightData.witchHealUsed = false;
       gameState.nightData.witchPoisonUsed = false;
 
-      // 可用角色清單 pool
-      const availableRoles = ['狼人', '預言家', '女巫', '騎士', '平民'];
+      let wolfCount = 1;
+      if (count >= 8 && count <= 10) wolfCount = 2;
+      else if (count === 12) wolfCount = 3;
+      else if (count >= 15) wolfCount = 4;
 
-      if (gameState.roleMode === 'RANDOM') {
-        // 🎲 全隨機模式：每一一位玩家都獨立從角色池隨機抽一個
-        gameState.players.forEach((p, idx) => {
-          const randomIndex = Math.floor(Math.random() * availableRoles.length);
-          p.role = availableRoles[randomIndex];
-          p.isAlive = true;
-          p.seatNumber = idx + 1;
-        });
-        addLog(`[系統] 遊戲開始 (採用完全隨機模式，每位玩家獨立抽取職業)。`);
-      } else {
-        // ⚖️ 標準模式：按固定比例分配
-        let wolfCount = 1;
-        if (count >= 8 && count <= 10) wolfCount = 2;
-        else if (count === 12) wolfCount = 3;
-        else if (count >= 15) wolfCount = 4;
+      let roles = [];
+      for (let i = 0; i < wolfCount; i++) roles.push('狼人');
+      roles.push('預言家', '女巫', '騎士');
 
-        let roles = [];
-        for (let i = 0; i < wolfCount; i++) roles.push('狼人');
-        roles.push('預言家', '女巫', '騎士');
-
-        while (roles.length < count) {
-          roles.push('平民');
-        }
-
-        roles.sort(() => Math.random() - 0.5);
-
-        gameState.players.forEach((p, idx) => {
-          p.role = roles[idx];
-          p.isAlive = true;
-          p.seatNumber = idx + 1;
-        });
-        addLog(`[系統] 遊戲開始 (採用標準配置模式，共 ${count} 人，含 ${wolfCount} 隻狼人)。`);
+      while (roles.length < count) {
+        roles.push('平民');
       }
 
+      roles.sort(() => Math.random() - 0.5);
+
+      gameState.players.forEach((p, idx) => {
+        p.role = roles[idx];
+        p.isAlive = true;
+        p.seatNumber = idx + 1;
+      });
+
       gameState.logs = [];
-      addLog(`[系統] 所有玩家座位號碼已分配完畢。`);
+      addLog(`[系統] 遊戲開始 (共 ${count} 人，含 ${wolfCount} 隻狼人)。座位號碼已分配完畢。`);
+      
+      // 遊戲開始後從公開列表隱藏
+      removeLobbyServer();
+      
       startNightPhase();
     });
 
